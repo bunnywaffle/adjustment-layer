@@ -30,7 +30,6 @@ Each adjustment creates a **Layer Group** set to **Pass Through** blend mode wit
 ## Features
 
 - **Non-destructive** — edit filter properties anytime by clicking the filter in the Layers panel
-- **Properties dialog** opens immediately after creating an adjustment layer
 - **Selection-aware masks** — if you have an active selection, it becomes the layer mask
 - **Undo-safe** — the entire operation is wrapped in a single undo group
 
