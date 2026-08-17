@@ -1,71 +1,89 @@
-# Adjustment Layer for GIMP 3
+# Adjustment Layer & Layer Effects for GIMP 3
 
-A Python plug-in that adds **Photoshop-style Adjustment Layers** to GIMP 3.0 / 3.2 using the new Non-Destructive Editing (NDE) features.
+A high-performance Python plug-in that brings **Photoshop-style Adjustment Layers** and **Non-Destructive Layer Effects** to GIMP 3.0, 3.2, and newer using GIMP's Non-Destructive Editing (NDE) engine and GEGL.
 
-## How It Works
+---
 
-Each adjustment creates a **Layer Group** set to **Pass Through** blend mode with a GEGL/GIMP filter applied non-destructively. A white layer mask is added so you can paint with black to hide the adjustment from specific areas — exactly like Photoshop's adjustment layers.
+## Key Features
 
-## Available Adjustments
+- 🪄 **Selection-Aware Masking**: If an active selection is present when creating an adjustment layer, it is automatically converted into the layer mask—applying adjustments strictly to the selected area.
+- 🎨 **19 Professional Adjustment Layers**: Complete tonal, color, blur, and creative adjustments powered by high-precision 32-bit floating point GEGL operations.
+- ⚡ **Instant Zero-Friction Creation**: No redundant pop-up dialogs. Layers and effects are created instantly on the canvas with full native live controls in GIMP's Layers dock.
+- 🔄 **Fully Non-Destructive (NDE)**: Adjustments and layer effects remain live! You can edit properties at any time directly in the Layers dock / filters list.
+- 🎭 **Dedicated Layer Effects**: Apply non-destructive Stroke / Outline, Drop Shadow, Long Shadow, Bevel & Emboss, Inner Glow, and Multi-Effect Layer Styles directly to any layer or group.
+- 🛡️ **Clean Undo / Redo**: Every action is encapsulated in a single undo group for clean, reliable Ctrl+Z undo/redo.
 
-| Adjustment | Operation |
-|---|---|
-| Hue-Saturation | `gimp:hue-saturation` |
-| Color Balance | `gimp:color-balance` |
-| Brightness-Contrast | `gimp:brightness-contrast` |
-| Levels | `gimp:levels` |
-| Curves | `gimp:curves` |
-| Exposure | `gegl:exposure` |
-| Colorize | `gimp:colorize` |
-| Channel Mixer | `gegl:channel-mixer` |
-| Shadows-Highlights | `gegl:shadows-highlights` |
-| Color Exchange | `gegl:color-exchange` |
-| Vibrance | `gegl:vibrance` |
-| Invert | `gegl:invert-gamma` |
-| Gaussian Blur | `gegl:gaussian-blur` |
-| Bloom | `gegl:bloom` |
-| Lens Flare | `gegl:lens-flare` |
-| Vignette | `gegl:vignette` |
+---
 
-## Features
+## Available Adjustment Layers
 
-- **Non-destructive** — edit filter properties anytime by clicking the filter in the Layers panel
-- **Selection-aware masks** — if you have an active selection, it becomes the layer mask
-- **Undo-safe** — the entire operation is wrapped in a single undo group
+Access via **Layer > Adjustment Layer**, **Image > Adjustment Layer**, or **Colors > Adjustment Layer**:
+
+| Adjustment Layer | GEGL Operation | Description & Key Parameters |
+|---|---|---|
+| **Saturation** | `gegl:saturation` | Scale color saturation factor (0.0 to 5.0). |
+| **Bloom** | `gegl:bloom` | Glow radius, strength, highlight threshold, softness, and exposure limit. |
+| **Invert** | `gegl:invert-gamma` | Perceptually uniform gamma-corrected color inversion. |
+| **Vibrance** | `gegl:vibrance` | Boosts muted colors intelligently without oversaturating skin tones. |
+| **Channel Mixer** | `gegl:mono-mixer` | Custom Red, Green, Blue channel weights with luminosity preservation. |
+| **Color Rotate** | `gegl:color-rotate` | Shift and remap hue ranges with degree-based angle controls. |
+| **Exposure** | `gegl:exposure` | Photographic exposure adjustment in stops and black-level offset. |
+| **Curves (Contrast Curve)** | `gegl:contrast-curve` | Tonal contrast curves with sampling point control. |
+| **Brightness-Contrast** | `gegl:brightness-contrast` | Standard brightness offset and contrast multiplier. |
+| **Levels** | `gegl:levels` | Input/Output black point and white point clipping controls. |
+| **Hue-Saturation (Hue-Chroma)** | `gegl:hue-chroma` | 360° Hue shift, Chroma boost/reduction, and Lightness adjustment. |
+| **Color Temperature** | `gegl:color-temperature` | Kelvin temperature adjustments (warm/cool white balance correction). |
+| **Sepia** | `gegl:sepia` | Classic sepia photographic toning with scale factor. |
+| **Black & White (Color to Gray)** | `gegl:c2g` | Advanced local-contrast grayscale conversion with iterations and sampling. |
+| **Threshold** | `gegl:threshold` | High-contrast binary black/white cutoff threshold. |
+| **Gaussian Blur** | `gegl:gaussian-blur` | Independent horizontal and vertical standard deviation blur radii. |
+| **High Pass** | `gegl:high-pass` | High-frequency detail extraction for frequency separation & sharpening. |
+| **Unsharp Mask** | `gegl:unsharp-mask` | Radius, amount/scale, and threshold sharpening controls. |
+| **Vignette** | `gegl:vignette` | Radial exposure falloff with radius, softness, and gamma curvature. |
+
+---
+
+## Available Layer Effects
+
+Access via **Layer > Layer Effects** or **Filters > Layer Effects**:
+
+| Layer Effect | GEGL Operation | Description & Parameters |
+|---|---|---|
+| **Stroke / Outline** | `gegl:dropshadow` | Clean outer outline/stroke with thickness, color, and opacity. |
+| **Drop Shadow** | `gegl:dropshadow` | X/Y pixel offsets, blur radius, opacity, and grow/spread radius. |
+| **Long Shadow** | `gegl:long-shadow` | Direction angle, projection length, and midpoint falloff. |
+| **Bevel & Emboss** | `gegl:bevel` | Bevel radius, light elevation, depth percentage, and azimuth angle. |
+| **Inner Glow** | `gegl:inner-glow` | Inner glow radius, spread grow-radius, and opacity. |
+| **Layer Styles** | `gegl:styles` | Multi-style layer effects (stroke, shadow, bevel, glow, overlay). |
+
+---
 
 ## Installation
 
-1. Download `adjustment-layer.py`
-2. Place it inside a folder named `adjustment-layer` in your GIMP plug-ins directory:
+1. Copy `adjustment-layer.py` into your GIMP plug-ins folder inside a directory named `adjustment-layer`:
 
-| OS | Path |
+| Operating System | Plug-in Directory Path |
 |---|---|
-| **Windows** | `%APPDATA%\GIMP\3.0\plug-ins\adjustment-layer\` |
-| **Linux** | `~/.config/GIMP/3.0/plug-ins/adjustment-layer/` |
-| **macOS** | `~/Library/Application Support/GIMP/3.0/plug-ins/adjustment-layer/` |
+| **Windows** | `%APPDATA%\GIMP\3.2\plug-ins\adjustment-layer\` (or `3.0`) |
+| **Linux** | `~/.config/GIMP/3.2/plug-ins/adjustment-layer/` (or `3.0`) |
+| **macOS** | `~/Library/Application Support/GIMP/3.2/plug-ins/adjustment-layer/` (or `3.0`) |
 
-3. **Linux/macOS:** Make the file executable:
+2. **Linux / macOS**: Ensure the file is executable:
    ```bash
    chmod +x adjustment-layer.py
    ```
-4. Restart GIMP
 
-The menu appears at **Image > Adjustment Layer**.
+3. Restart GIMP.
 
-## Usage
-
-1. Open an image in GIMP
-2. Select a layer
-3. Go to **Image > Adjustment Layer** and choose an adjustment
-4. A properties dialog opens — adjust the values and click OK
-5. A new pass-through layer group appears above your selected layer
-6. Paint on the white mask with black to hide the adjustment where needed
+---
 
 ## Requirements
 
-- GIMP 3.0 or newer (including 3.2)
+- GIMP 3.0, 3.2, or newer
 - Python 3 support enabled in GIMP
+
+---
 
 ## License
 
-[GPLv3](LICENSE)
+[GNU General Public License v3.0](LICENSE)
