@@ -8,9 +8,9 @@ Provides non-destructive Photoshop-style Adjustment Layers using Pass-Through
 Layer Groups and GEGL filters with selection-aware layer masks, as well as
 direct Non-Destructive Layer Effects.
 
-All adjustments and effects are created with the layer group automatically
-expanded, so the user can instantly see and access the live effects panel
-and filters in GIMP 3's Layers dock.
+When an adjustment layer or layer effect is added, its effect adjustment
+dialog opens immediately with live on-canvas controls so the user can tweak
+parameters in real-time.
 
 Menu Locations:
 - Layer > Adjustment Layer > [Adjustment]
@@ -22,15 +22,17 @@ Menu Locations:
 ------------------------------------------------------------------------------
 HOW TO ADD NEW ADJUSTMENTS OR EFFECTS IN THE FUTURE:
 ------------------------------------------------------------------------------
-Adding a new adjustment layer or layer effect takes just ONE single entry in
-either ADJUSTMENTS or LAYER_EFFECTS below:
+Adding a new adjustment layer or layer effect takes just ONE entry in either
+ADJUSTMENTS or LAYER_EFFECTS below:
 
 Example:
    "oilify": {
        "name": "Oilify",
        "op": "gegl:oilify",
-       "label": "_Oilify",
-       "defaults": {"mask-radius": 5},   # optional initial settings
+       "label": "_Oilify...",
+       "args": [
+           {"name": "mask-radius", "type": "int", "nick": "Radius", "min": 1, "max": 50, "default": 5},
+       ],
    }
 ==============================================================================
 """
@@ -39,8 +41,9 @@ import sys
 import gi
 
 gi.require_version("Gimp", "3.0")
+gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
-from gi.repository import Gimp, Gegl, GLib
+from gi.repository import Gimp, GimpUi, Gegl, GObject, GLib
 
 # Initialize GEGL subsystem
 Gegl.init(None)
@@ -55,120 +58,562 @@ FX_PREFIX = "plug-in-layer-effect-"
 ADJUSTMENTS = {
     # --- Color & Tonal Adjustments ---
     "saturation": {
-        "label": "_Saturation",
+        "label": "_Saturation...",
         "name": "Saturation",
         "op": "gegl:saturation",
-        "defaults": {"scale": 1.2},
+        "args": [
+            {
+                "name": "scale",
+                "type": "double",
+                "nick": "Scale",
+                "blurb": "Saturation scaling factor (1.0 = normal)",
+                "min": 0.0,
+                "max": 5.0,
+                "default": 1.2,
+            }
+        ],
     },
     "vibrance": {
-        "label": "_Vibrance",
+        "label": "_Vibrance...",
         "name": "Vibrance",
         "op": "gegl:vibrance",
-        "defaults": {"vibrance": 0.25, "saturation": 1.0},
+        "args": [
+            {
+                "name": "vibrance",
+                "type": "double",
+                "nick": "Vibrance",
+                "blurb": "Vibrance adjustment (boosts muted colors)",
+                "min": -1.0,
+                "max": 1.0,
+                "default": 0.25,
+            },
+            {
+                "name": "saturation",
+                "type": "double",
+                "nick": "Saturation Multiplier",
+                "blurb": "Overall saturation multiplier",
+                "min": 0.0,
+                "max": 2.0,
+                "default": 1.0,
+            },
+        ],
     },
     "exposure": {
-        "label": "_Exposure",
+        "label": "_Exposure...",
         "name": "Exposure",
         "op": "gegl:exposure",
-        "defaults": {"exposure": 0.0, "black-level": 0.0},
+        "args": [
+            {
+                "name": "exposure",
+                "type": "double",
+                "nick": "Exposure (Stops)",
+                "blurb": "Relative brightness change in exposure stops",
+                "min": -10.0,
+                "max": 10.0,
+                "default": 0.0,
+            },
+            {
+                "name": "black-level",
+                "type": "double",
+                "nick": "Black Level",
+                "blurb": "Adjust the black level offset",
+                "min": -0.1,
+                "max": 0.1,
+                "default": 0.0,
+            },
+        ],
     },
     "brightness-contrast": {
-        "label": "_Brightness-Contrast",
+        "label": "_Brightness-Contrast...",
         "name": "Brightness-Contrast",
         "op": "gegl:brightness-contrast",
-        "defaults": {"brightness": 0.0, "contrast": 1.0},
+        "args": [
+            {
+                "name": "brightness",
+                "type": "double",
+                "nick": "Brightness",
+                "blurb": "Amount to increase or decrease brightness",
+                "min": -1.0,
+                "max": 1.0,
+                "default": 0.0,
+            },
+            {
+                "name": "contrast",
+                "type": "double",
+                "nick": "Contrast",
+                "blurb": "Amount to scale contrast (1.0 = unchanged)",
+                "min": -1.0,
+                "max": 5.0,
+                "default": 1.0,
+            },
+        ],
     },
     "levels": {
-        "label": "_Levels",
+        "label": "_Levels...",
         "name": "Levels",
         "op": "gegl:levels",
-        "defaults": {"in-low": 0.0, "in-high": 1.0, "out-low": 0.0, "out-high": 1.0},
+        "args": [
+            {
+                "name": "in-low",
+                "type": "double",
+                "nick": "Input Black Point",
+                "blurb": "Input low black level",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0,
+            },
+            {
+                "name": "in-high",
+                "type": "double",
+                "nick": "Input White Point",
+                "blurb": "Input high white level",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0,
+            },
+            {
+                "name": "out-low",
+                "type": "double",
+                "nick": "Output Black Point",
+                "blurb": "Output low black level",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0,
+            },
+            {
+                "name": "out-high",
+                "type": "double",
+                "nick": "Output White Point",
+                "blurb": "Output high white level",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0,
+            },
+        ],
     },
     "curves": {
-        "label": "_Curves (Contrast Curve)",
+        "label": "_Curves (Contrast Curve)...",
         "name": "Curves",
         "op": "gegl:contrast-curve",
-        "defaults": {},
+        "args": [
+            {
+                "name": "sampling-points",
+                "type": "int",
+                "nick": "Sampling Points",
+                "blurb": "Number of curve sampling points",
+                "min": 0,
+                "max": 256,
+                "default": 0,
+            }
+        ],
     },
     "hue-chroma": {
-        "label": "Hue-_Saturation (Hue-Chroma)",
+        "label": "Hue-_Saturation (Hue-Chroma)...",
         "name": "Hue-Saturation",
         "op": "gegl:hue-chroma",
-        "defaults": {"hue": 0.0, "chroma": 0.0, "lightness": 0.0},
+        "args": [
+            {
+                "name": "hue",
+                "type": "double",
+                "nick": "Hue Shift (°)",
+                "blurb": "Hue rotation angle in degrees",
+                "min": -180.0,
+                "max": 180.0,
+                "default": 0.0,
+            },
+            {
+                "name": "chroma",
+                "type": "double",
+                "nick": "Chroma / Saturation",
+                "blurb": "Chroma color saturation adjustment",
+                "min": -100.0,
+                "max": 100.0,
+                "default": 0.0,
+            },
+            {
+                "name": "lightness",
+                "type": "double",
+                "nick": "Lightness",
+                "blurb": "Lightness adjustment",
+                "min": -100.0,
+                "max": 100.0,
+                "default": 0.0,
+            },
+        ],
     },
     "channel-mixer": {
-        "label": "Channel _Mixer",
+        "label": "Channel _Mixer...",
         "name": "Channel Mixer",
         "op": "gegl:mono-mixer",
-        "defaults": {"preserve-luminosity": True, "red": 0.333, "green": 0.333, "blue": 0.333},
+        "args": [
+            {
+                "name": "preserve-luminosity",
+                "type": "boolean",
+                "nick": "Preserve Luminosity",
+                "blurb": "Preserve overall perceived brightness",
+                "default": True,
+            },
+            {
+                "name": "red",
+                "type": "double",
+                "nick": "Red Weight",
+                "blurb": "Red channel contribution",
+                "min": -2.0,
+                "max": 2.0,
+                "default": 0.333,
+            },
+            {
+                "name": "green",
+                "type": "double",
+                "nick": "Green Weight",
+                "blurb": "Green channel contribution",
+                "min": -2.0,
+                "max": 2.0,
+                "default": 0.333,
+            },
+            {
+                "name": "blue",
+                "type": "double",
+                "nick": "Blue Weight",
+                "blurb": "Blue channel contribution",
+                "min": -2.0,
+                "max": 2.0,
+                "default": 0.333,
+            },
+        ],
     },
     "color-rotate": {
-        "label": "Color _Rotate",
+        "label": "Color _Rotate...",
         "name": "Color Rotate",
         "op": "gegl:color-rotate",
-        "defaults": {"src-from": 0.0, "src-to": 360.0, "dest-from": 0.0, "dest-to": 360.0},
+        "args": [
+            {
+                "name": "src-from",
+                "type": "double",
+                "nick": "Source From (°)",
+                "blurb": "Source hue range start angle in degrees",
+                "min": 0.0,
+                "max": 360.0,
+                "default": 0.0,
+            },
+            {
+                "name": "src-to",
+                "type": "double",
+                "nick": "Source To (°)",
+                "blurb": "Source hue range end angle in degrees",
+                "min": 0.0,
+                "max": 360.0,
+                "default": 360.0,
+            },
+            {
+                "name": "dest-from",
+                "type": "double",
+                "nick": "Destination From (°)",
+                "blurb": "Destination hue range start angle in degrees",
+                "min": 0.0,
+                "max": 360.0,
+                "default": 0.0,
+            },
+            {
+                "name": "dest-to",
+                "type": "double",
+                "nick": "Destination To (°)",
+                "blurb": "Destination hue range end angle in degrees",
+                "min": 0.0,
+                "max": 360.0,
+                "default": 360.0,
+            },
+            {
+                "name": "threshold",
+                "type": "double",
+                "nick": "Threshold",
+                "blurb": "Gray threshold",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0,
+            },
+        ],
     },
     "color-temperature": {
-        "label": "Color _Temperature",
+        "label": "Color _Temperature...",
         "name": "Color Temperature",
         "op": "gegl:color-temperature",
-        "defaults": {"original-temperature": 6500.0, "intended-temperature": 5500.0},
+        "args": [
+            {
+                "name": "original-temperature",
+                "type": "double",
+                "nick": "Original Temperature (K)",
+                "blurb": "Original color temperature of source in Kelvin",
+                "min": 1000.0,
+                "max": 12000.0,
+                "default": 6500.0,
+            },
+            {
+                "name": "intended-temperature",
+                "type": "double",
+                "nick": "Intended Temperature (K)",
+                "blurb": "Desired color temperature in Kelvin",
+                "min": 1000.0,
+                "max": 12000.0,
+                "default": 5500.0,
+            },
+        ],
     },
     "invert": {
         "label": "_Invert",
         "name": "Invert",
         "op": "gegl:invert-gamma",
-        "defaults": {},
+        "args": [],
     },
     "sepia": {
-        "label": "Se_pia",
+        "label": "Se_pia...",
         "name": "Sepia",
         "op": "gegl:sepia",
-        "defaults": {"scale": 1.0, "srgb": True},
+        "args": [
+            {
+                "name": "scale",
+                "type": "double",
+                "nick": "Sepia Scale",
+                "blurb": "Strength of sepia tone effect",
+                "min": 0.0,
+                "max": 2.0,
+                "default": 1.0,
+            },
+            {
+                "name": "srgb",
+                "type": "boolean",
+                "nick": "sRGB",
+                "blurb": "Process in sRGB gamma space",
+                "default": True,
+            },
+        ],
     },
     "color-to-gray": {
-        "label": "_Black & White (Color to Gray)",
+        "label": "_Black & White (Color to Gray)...",
         "name": "Black & White",
         "op": "gegl:c2g",
-        "defaults": {"radius": 50, "samples": 8, "iterations": 4},
+        "args": [
+            {
+                "name": "radius",
+                "type": "int",
+                "nick": "Radius",
+                "blurb": "Neighborhood radius for local contrast computation",
+                "min": 1,
+                "max": 300,
+                "default": 50,
+            },
+            {
+                "name": "samples",
+                "type": "int",
+                "nick": "Samples",
+                "blurb": "Number of samples per pixel",
+                "min": 1,
+                "max": 64,
+                "default": 8,
+            },
+            {
+                "name": "iterations",
+                "type": "int",
+                "nick": "Iterations",
+                "blurb": "Number of refinement iterations",
+                "min": 1,
+                "max": 10,
+                "default": 4,
+            },
+            {
+                "name": "enhance-shadows",
+                "type": "boolean",
+                "nick": "Enhance Shadows",
+                "blurb": "Enhance shadow details in grayscale output",
+                "default": False,
+            },
+        ],
     },
     "threshold": {
-        "label": "_Threshold",
+        "label": "_Threshold...",
         "name": "Threshold",
         "op": "gegl:threshold",
-        "defaults": {"value": 0.5},
+        "args": [
+            {
+                "name": "value",
+                "type": "double",
+                "nick": "Threshold Level",
+                "blurb": "Threshold cutoff value (0.0 to 1.0)",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.5,
+            }
+        ],
     },
 
     # --- Creative, Blur & Detail Adjustments ---
     "bloom": {
-        "label": "_Bloom",
+        "label": "_Bloom...",
         "name": "Bloom",
         "op": "gegl:bloom",
-        "defaults": {"radius": 10.0, "strength": 50.0, "threshold": 50.0, "softness": 25.0},
+        "args": [
+            {
+                "name": "radius",
+                "type": "double",
+                "nick": "Radius",
+                "blurb": "Glow blur radius in pixels",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 10.0,
+            },
+            {
+                "name": "strength",
+                "type": "double",
+                "nick": "Strength",
+                "blurb": "Glow strength",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 50.0,
+            },
+            {
+                "name": "threshold",
+                "type": "double",
+                "nick": "Threshold",
+                "blurb": "Highlight threshold",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 50.0,
+            },
+            {
+                "name": "softness",
+                "type": "double",
+                "nick": "Softness",
+                "blurb": "Bloom transition softness",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 25.0,
+            },
+            {
+                "name": "limit-exposure",
+                "type": "boolean",
+                "nick": "Limit Exposure",
+                "blurb": "Limit exposure of highlight glow",
+                "default": False,
+            },
+        ],
     },
     "gaussian-blur": {
-        "label": "Gaussian _Blur",
+        "label": "Gaussian _Blur...",
         "name": "Gaussian Blur",
         "op": "gegl:gaussian-blur",
-        "defaults": {"std-dev-x": 5.0, "std-dev-y": 5.0},
+        "args": [
+            {
+                "name": "std-dev-x",
+                "type": "double",
+                "nick": "Size X",
+                "blurb": "Standard deviation in horizontal direction (pixels)",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 5.0,
+            },
+            {
+                "name": "std-dev-y",
+                "type": "double",
+                "nick": "Size Y",
+                "blurb": "Standard deviation in vertical direction (pixels)",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 5.0,
+            },
+        ],
     },
     "high-pass": {
-        "label": "_High Pass",
+        "label": "_High Pass...",
         "name": "High Pass",
         "op": "gegl:high-pass",
-        "defaults": {"std-dev": 5.0, "contrast": 1.0},
+        "args": [
+            {
+                "name": "std-dev",
+                "type": "double",
+                "nick": "Radius (Std Dev)",
+                "blurb": "High pass filter radius in pixels",
+                "min": 0.1,
+                "max": 100.0,
+                "default": 5.0,
+            },
+            {
+                "name": "contrast",
+                "type": "double",
+                "nick": "Contrast",
+                "blurb": "Contrast scaling factor",
+                "min": 0.0,
+                "max": 5.0,
+                "default": 1.0,
+            },
+        ],
     },
     "unsharp-mask": {
-        "label": "_Unsharp Mask (Sharpen)",
+        "label": "_Unsharp Mask (Sharpen)...",
         "name": "Unsharp Mask",
         "op": "gegl:unsharp-mask",
-        "defaults": {"std-dev": 1.5, "scale": 1.0, "threshold": 0.0},
+        "args": [
+            {
+                "name": "std-dev",
+                "type": "double",
+                "nick": "Radius (Std Dev)",
+                "blurb": "Gaussian blur radius for unsharp masking in pixels",
+                "min": 0.1,
+                "max": 50.0,
+                "default": 1.5,
+            },
+            {
+                "name": "scale",
+                "type": "double",
+                "nick": "Amount / Scale",
+                "blurb": "Sharpening intensity scaling factor",
+                "min": 0.0,
+                "max": 5.0,
+                "default": 1.0,
+            },
+            {
+                "name": "threshold",
+                "type": "double",
+                "nick": "Threshold",
+                "blurb": "Minimum tonal difference to sharpen",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0,
+            },
+        ],
     },
     "vignette": {
-        "label": "Vi_gnette",
+        "label": "Vi_gnette...",
         "name": "Vignette",
         "op": "gegl:vignette",
-        "defaults": {"radius": 1.0, "softness": 0.5, "gamma": 2.0},
+        "args": [
+            {
+                "name": "radius",
+                "type": "double",
+                "nick": "Radius",
+                "blurb": "Vignette coverage radius proportion",
+                "min": 0.0,
+                "max": 2.0,
+                "default": 1.0,
+            },
+            {
+                "name": "softness",
+                "type": "double",
+                "nick": "Softness",
+                "blurb": "Vignette edge softness",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.5,
+            },
+            {
+                "name": "gamma",
+                "type": "double",
+                "nick": "Falloff Gamma",
+                "blurb": "Falloff curve exponent",
+                "min": 0.0,
+                "max": 5.0,
+                "default": 2.0,
+            },
+        ],
     },
 }
 
@@ -178,48 +623,314 @@ ADJUSTMENTS = {
 
 LAYER_EFFECTS = {
     "stroke": {
-        "label": "Stro_ke / Outline",
+        "label": "Stro_ke / Outline...",
         "name": "Stroke / Outline",
         "op": "gegl:dropshadow",
-        "defaults": {
-            "x": 0.0,
-            "y": 0.0,
-            "radius": 0.0,
-            "grow-radius": 4.0,
-            "opacity": 1.0,
-        },
+        "args": [
+            {
+                "name": "grow-radius",
+                "type": "double",
+                "nick": "Stroke Thickness (px)",
+                "blurb": "Outline stroke thickness in pixels",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 4.0,
+            },
+            {
+                "name": "opacity",
+                "type": "double",
+                "nick": "Opacity",
+                "blurb": "Stroke opacity (0.0 to 1.0)",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0,
+            },
+            {
+                "name": "radius",
+                "type": "double",
+                "nick": "Blur Radius",
+                "blurb": "Stroke edge blur radius",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 0.0,
+            },
+        ],
     },
     "drop-shadow": {
-        "label": "_Drop Shadow",
+        "label": "_Drop Shadow...",
         "name": "Drop Shadow",
         "op": "gegl:dropshadow",
-        "defaults": {"x": 10.0, "y": 10.0, "radius": 10.0, "opacity": 0.6, "grow-radius": 0.0},
+        "args": [
+            {
+                "name": "x",
+                "type": "double",
+                "nick": "Horizontal Offset (X)",
+                "blurb": "Horizontal offset of shadow in pixels",
+                "min": -200.0,
+                "max": 200.0,
+                "default": 10.0,
+            },
+            {
+                "name": "y",
+                "type": "double",
+                "nick": "Vertical Offset (Y)",
+                "blurb": "Vertical offset of shadow in pixels",
+                "min": -200.0,
+                "max": 200.0,
+                "default": 10.0,
+            },
+            {
+                "name": "radius",
+                "type": "double",
+                "nick": "Blur Radius",
+                "blurb": "Shadow blur radius in pixels",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 10.0,
+            },
+            {
+                "name": "opacity",
+                "type": "double",
+                "nick": "Opacity",
+                "blurb": "Shadow opacity (0.0 to 1.0)",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.6,
+            },
+            {
+                "name": "grow-radius",
+                "type": "double",
+                "nick": "Grow Radius / Spread",
+                "blurb": "Grow shadow radius before blurring in pixels",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 0.0,
+            },
+        ],
     },
     "long-shadow": {
-        "label": "_Long Shadow",
+        "label": "_Long Shadow...",
         "name": "Long Shadow",
         "op": "gegl:long-shadow",
-        "defaults": {"angle": 45.0, "length": 100.0, "midpoint-rel": 0.5},
+        "args": [
+            {
+                "name": "angle",
+                "type": "double",
+                "nick": "Angle (°)",
+                "blurb": "Shadow projection angle in degrees",
+                "min": 0.0,
+                "max": 360.0,
+                "default": 45.0,
+            },
+            {
+                "name": "length",
+                "type": "double",
+                "nick": "Length (px)",
+                "blurb": "Shadow length in pixels",
+                "min": 0.0,
+                "max": 1000.0,
+                "default": 100.0,
+            },
+            {
+                "name": "midpoint-rel",
+                "type": "double",
+                "nick": "Midpoint",
+                "blurb": "Relative midpoint fade position (0.0 to 1.0)",
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.5,
+            },
+        ],
     },
     "bevel": {
-        "label": "_Bevel & Emboss",
+        "label": "_Bevel & Emboss...",
         "name": "Bevel & Emboss",
         "op": "gegl:bevel",
-        "defaults": {"radius": 5.0, "elevation": 25.0, "depth": 40, "azimuth": 68.0},
+        "args": [
+            {
+                "name": "radius",
+                "type": "double",
+                "nick": "Radius / Size (px)",
+                "blurb": "Bevel width radius in pixels",
+                "min": 0.0,
+                "max": 50.0,
+                "default": 5.0,
+            },
+            {
+                "name": "elevation",
+                "type": "double",
+                "nick": "Elevation (°)",
+                "blurb": "Light elevation angle in degrees",
+                "min": 0.0,
+                "max": 90.0,
+                "default": 25.0,
+            },
+            {
+                "name": "depth",
+                "type": "int",
+                "nick": "Depth",
+                "blurb": "Bevel depth percentage",
+                "min": 1,
+                "max": 100,
+                "default": 40,
+            },
+            {
+                "name": "azimuth",
+                "type": "double",
+                "nick": "Azimuth / Light Angle (°)",
+                "blurb": "Light source direction angle in degrees",
+                "min": 0.0,
+                "max": 360.0,
+                "default": 68.0,
+            },
+        ],
     },
     "inner-glow": {
-        "label": "_Inner Glow",
+        "label": "_Inner Glow...",
         "name": "Inner Glow",
         "op": "gegl:inner-glow",
-        "defaults": {"radius": 10.0, "grow-radius": 4.0, "opacity": 1.0},
+        "args": [
+            {
+                "name": "radius",
+                "type": "double",
+                "nick": "Glow Radius (px)",
+                "blurb": "Inner glow blur radius in pixels",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 10.0,
+            },
+            {
+                "name": "grow-radius",
+                "type": "double",
+                "nick": "Grow Radius (px)",
+                "blurb": "Inner glow grow radius in pixels",
+                "min": 0.0,
+                "max": 100.0,
+                "default": 4.0,
+            },
+            {
+                "name": "opacity",
+                "type": "double",
+                "nick": "Opacity",
+                "blurb": "Inner glow opacity",
+                "min": 0.0,
+                "max": 2.0,
+                "default": 1.0,
+            },
+        ],
     },
     "styles": {
-        "label": "Layer _Styles (Multi-Effect)",
+        "label": "Layer _Styles (Multi-Effect)...",
         "name": "Layer Styles",
         "op": "gegl:styles",
-        "defaults": {},
+        "args": [],
     },
 }
+
+
+# ============================================================================
+# HELPER UTILITIES: GEGL AUTO-INSPECTION & EXTENSIBILITY
+# ============================================================================
+
+_GEGL_OP_CACHE = {}
+
+
+def auto_inspect_gegl_args(op_name):
+    """
+    Auto-discovers properties of a GEGL operation if arguments are not
+    explicitly declared. Returns a list of argument definitions.
+    """
+    if op_name in _GEGL_OP_CACHE:
+        return _GEGL_OP_CACHE[op_name]
+
+    args = []
+    try:
+        node = Gegl.Node()
+        node.set_property("operation", op_name)
+        op = node.get_gegl_operation()
+        if not op:
+            _GEGL_OP_CACHE[op_name] = args
+            return args
+
+        base_props = {
+            "operation",
+            "name",
+            "gegl-operation",
+            "dont-cache",
+            "cache-policy",
+            "use-opencl",
+            "passthrough",
+        }
+        for pspec in GObject.list_properties(op):
+            if pspec.name in base_props:
+                continue
+
+            ptype = pspec.value_type.name
+            val_default = op.get_property(pspec.name)
+            nick = pspec.get_nick() or pspec.name.replace("-", " ").title()
+            blurb = pspec.get_blurb() or ""
+
+            if ptype in ("gdouble", "gfloat"):
+                min_v = float(getattr(pspec, "minimum", -100.0))
+                max_v = float(getattr(pspec, "maximum", 100.0))
+                if min_v < -1000.0:
+                    min_v = -100.0
+                if max_v > 1000.0:
+                    max_v = 100.0
+                args.append(
+                    {
+                        "name": pspec.name,
+                        "type": "double",
+                        "nick": nick,
+                        "blurb": blurb,
+                        "min": min_v,
+                        "max": max_v,
+                        "default": float(val_default if val_default is not None else 0.0),
+                    }
+                )
+            elif ptype in ("gint", "guint", "glong", "gulong"):
+                min_v = int(getattr(pspec, "minimum", 0))
+                max_v = int(getattr(pspec, "maximum", 100))
+                if min_v < -1000:
+                    min_v = 0
+                if max_v > 1000:
+                    max_v = 100
+                args.append(
+                    {
+                        "name": pspec.name,
+                        "type": "int",
+                        "nick": nick,
+                        "blurb": blurb,
+                        "min": min_v,
+                        "max": max_v,
+                        "default": int(val_default if val_default is not None else 0),
+                    }
+                )
+            elif ptype == "gboolean":
+                args.append(
+                    {
+                        "name": pspec.name,
+                        "type": "boolean",
+                        "nick": nick,
+                        "blurb": blurb,
+                        "default": bool(val_default if val_default is not None else False),
+                    }
+                )
+    except Exception:
+        pass
+
+    _GEGL_OP_CACHE[op_name] = args
+    return args
+
+
+def get_effective_args(spec):
+    """
+    Returns explicit arguments if defined in the spec, otherwise
+    falls back to auto-discovering from the GEGL operation.
+    """
+    if "args" in spec:
+        return spec["args"]
+    return auto_inspect_gegl_args(spec.get("op", ""))
 
 
 # ============================================================================
@@ -261,7 +972,7 @@ class AdjustmentLayer(Gimp.PlugIn):
         return None
 
     def _build_procedure(self, name, spec, run_callback, is_adjustment=True):
-        """Builds a GIMP procedure with clean, instant execution."""
+        """Unified procedure constructor for adjustments and layer effects."""
         p = Gimp.ImageProcedure.new(
             self, name, Gimp.PDBProcType.PLUGIN, run_callback, None
         )
@@ -274,7 +985,7 @@ class AdjustmentLayer(Gimp.PlugIn):
             )
             p.set_documentation(
                 f"Add {spec['name']} Adjustment Layer",
-                f"Creates a non-destructive {spec['name']} adjustment layer with selection-aware mask.",
+                f"Creates a non-destructive {spec['name']} adjustment layer with live interactive controls.",
                 name,
             )
             # CRITICAL: set_menu_label MUST be called BEFORE add_menu_path!
@@ -299,19 +1010,83 @@ class AdjustmentLayer(Gimp.PlugIn):
             p.add_menu_path("<Image>/Layer/Layer Effects")
             p.add_menu_path("<Image>/Filters/Layer Effects")
 
+        # Register arguments for ProcedureDialog
+        for arg in get_effective_args(spec):
+            self._register_arg(p, arg)
+
         return p
 
-    def _apply_initial_defaults(self, filter_obj, defaults):
-        """Applies initial default properties to the created GEGL filter."""
-        if not filter_obj or not defaults:
+    def _register_arg(self, proc, arg):
+        atype = arg.get("type", "double")
+        aname = arg["name"]
+        anick = arg.get("nick", aname)
+        ablurb = arg.get("blurb", "")
+
+        if atype == "double":
+            proc.add_double_argument(
+                aname,
+                anick,
+                ablurb,
+                arg.get("min", -100.0),
+                arg.get("max", 100.0),
+                arg.get("default", 0.0),
+                GObject.ParamFlags.READWRITE,
+            )
+        elif atype == "int":
+            proc.add_int_argument(
+                aname,
+                anick,
+                ablurb,
+                arg.get("min", 0),
+                arg.get("max", 100),
+                arg.get("default", 0),
+                GObject.ParamFlags.READWRITE,
+            )
+        elif atype == "boolean":
+            proc.add_boolean_argument(
+                aname,
+                anick,
+                ablurb,
+                arg.get("default", False),
+                GObject.ParamFlags.READWRITE,
+            )
+
+    def _show_interactive_dialog(self, procedure, config, title, filter_obj, args_list):
+        """Displays native ProcedureDialog with live updates on canvas."""
+        GimpUi.init("adjustment-layer")
+        dialog = GimpUi.ProcedureDialog.new(procedure, config, title)
+        dialog.fill(None)
+
+        # Hook config change notifications to update GEGL filter live
+        if filter_obj and args_list:
+            filter_config = filter_obj.get_config()
+            def on_config_notify(cfg, pspec):
+                self._transfer_config_properties(cfg, filter_config, args_list)
+                filter_obj.update()
+                Gimp.displays_flush()
+
+            handler_id = config.connect("notify", on_config_notify)
+        else:
+            handler_id = None
+
+        confirmed = bool(dialog.run())
+
+        if handler_id and config.is_connected(handler_id):
+            config.disconnect(handler_id)
+
+        dialog.destroy()
+        return confirmed
+
+    def _transfer_config_properties(self, source_config, target_config, args_list):
+        """Copies parameter values from procedure config to GEGL filter config."""
+        if not (source_config and target_config and args_list):
             return
-        config = filter_obj.get_config()
-        if not config:
-            return
-        for prop_name, val in defaults.items():
-            if config.find_property(prop_name):
+        for arg in args_list:
+            pname = arg["name"]
+            if source_config.find_property(pname) and target_config.find_property(pname):
+                val = source_config.get_property(pname)
                 try:
-                    config.set_property(prop_name, val)
+                    target_config.set_property(pname, val)
                 except Exception:
                     pass
 
@@ -324,6 +1099,7 @@ class AdjustmentLayer(Gimp.PlugIn):
             )
 
         adj = ADJUSTMENTS[key]
+        args_list = get_effective_args(adj)
 
         # Determine target insertion position in the layer stack
         if drawables and len(drawables) > 0:
@@ -370,14 +1146,26 @@ class AdjustmentLayer(Gimp.PlugIn):
 
             # 4. Attach non-destructive GEGL filter to the layer group
             f = Gimp.DrawableFilter.new(group, adj["op"], adj["name"])
-            self._apply_initial_defaults(f, adj.get("defaults", {}))
+            self._transfer_config_properties(config, f.get_config(), args_list)
             group.append_filter(f)
 
-            # 5. Expand group so the user can immediately see and access the effects/filter row
-            group.set_expanded(True)
+            # 5. Keep group clean & collapsed
+            group.set_expanded(False)
 
-            # 6. Select the new adjustment group so the user can immediately paint or adjust
+            # 6. Select the adjustment group
             image.set_selected_layers([group])
+            Gimp.displays_flush()
+
+            # 7. Interactive configuration dialog with live preview
+            if run_mode == Gimp.RunMode.INTERACTIVE and args_list:
+                if not self._show_interactive_dialog(
+                    procedure, config, f"Adjustment: {adj['name']}", f, args_list
+                ):
+                    # Clean rollback on cancel
+                    image.remove_layer(group)
+                    image.undo_group_end()
+                    Gimp.displays_flush()
+                    return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
 
         except Exception as e:
             image.undo_group_end()
@@ -405,17 +1193,25 @@ class AdjustmentLayer(Gimp.PlugIn):
             )
 
         fx = LAYER_EFFECTS[key]
+        args_list = get_effective_args(fx)
 
         image.undo_group_start()
         try:
             f = Gimp.DrawableFilter.new(drawable, fx["op"], fx["name"])
-            self._apply_initial_defaults(f, fx.get("defaults", {}))
+            self._transfer_config_properties(config, f.get_config(), args_list)
             drawable.append_filter(f)
-
-            if drawable.is_group_layer():
-                drawable.set_expanded(True)
-
             image.set_selected_layers([drawable])
+            Gimp.displays_flush()
+
+            # Interactive configuration dialog with live preview
+            if run_mode == Gimp.RunMode.INTERACTIVE and args_list:
+                if not self._show_interactive_dialog(
+                    procedure, config, f"Layer Effect: {fx['name']}", f, args_list
+                ):
+                    f.delete()
+                    image.undo_group_end()
+                    Gimp.displays_flush()
+                    return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
 
         except Exception as e:
             image.undo_group_end()
