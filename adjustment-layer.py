@@ -8,10 +8,9 @@ Provides non-destructive Photoshop-style Adjustment Layers using Pass-Through
 Layer Groups and GEGL filters with selection-aware layer masks, as well as
 direct Non-Destructive Layer Effects.
 
-All adjustments and effects are created instantly without redundant pop-up
-dialogs. Full interactive controls, presets, and live preview are managed
-directly by GIMP 3's native Non-Destructive Editing (NDE) engine in the
-Layers dock.
+All adjustments and effects are created with the layer group automatically
+expanded, so the user can instantly see and access the live effects panel
+and filters in GIMP 3's Layers dock.
 
 Menu Locations:
 - Layer > Adjustment Layer > [Adjustment]
@@ -374,8 +373,8 @@ class AdjustmentLayer(Gimp.PlugIn):
             self._apply_initial_defaults(f, adj.get("defaults", {}))
             group.append_filter(f)
 
-            # 5. Collapse group for clean layer stack display
-            group.set_expanded(False)
+            # 5. Expand group so the user can immediately see and access the effects/filter row
+            group.set_expanded(True)
 
             # 6. Select the new adjustment group so the user can immediately paint or adjust
             image.set_selected_layers([group])
@@ -412,6 +411,11 @@ class AdjustmentLayer(Gimp.PlugIn):
             f = Gimp.DrawableFilter.new(drawable, fx["op"], fx["name"])
             self._apply_initial_defaults(f, fx.get("defaults", {}))
             drawable.append_filter(f)
+
+            if drawable.is_group_layer():
+                drawable.set_expanded(True)
+
+            image.set_selected_layers([drawable])
 
         except Exception as e:
             image.undo_group_end()
